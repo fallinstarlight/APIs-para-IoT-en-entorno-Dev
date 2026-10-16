@@ -3,12 +3,13 @@ from fastapi import APIRouter
 from ..database import call_procedure, call_procedure_no_result
 from ..errors import BadRequest, ResourceNotFound
 from ..schemas import Status, StatusUpdate
+from ..state_store import store
 
 router = APIRouter(prefix="/status", tags=["Status"])
 
 
 @router.post("", summary="spUpdateStatus (+ spRegisterHistory)")
-def update_status(payload: StatusUpdate):
+async def update_status(payload: StatusUpdate):
     if payload.vehicleId <= 0:
         raise BadRequest("vehicleId must be a positive integer")
     if payload.commandId is not None and payload.commandId <= 0:
@@ -25,6 +26,28 @@ def update_status(payload: StatusUpdate):
             "spRegisterHistory",
             [payload.vehicleId, payload.commandId, payload.source],
         )
+
+    # Look up the command's name/code so the broadcast is self-describing.
+    command_name = None
+    code = None
+    if payload.commandId is not None:
+        try:
+            for c in call_procedure("spGetVehicleCommands", [payload.vehicleId]):
+                if c.get("commandId") == payload.commandId:
+                    command_name = c.get("name")
+                    code = c.get("code")
+                    break
+        except Exception:
+            pass
+
+    await store.set(
+        payload.vehicleId,
+        commandId=payload.commandId,
+        commandName=command_name,
+        code=code,
+        isConnected=payload.isConnected,
+        source=payload.source,
+    )
 
     return {
         "status": "ok",

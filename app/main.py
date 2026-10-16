@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .errors import register_exception_handlers
-from .routers import commands, demos, history, status, vehicles
+from .routers import commands, demos, history, status, vehicles, ws_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,11 +16,9 @@ app = FastAPI(
     title="IoT Vehicle API",
     description=(
         "REST + WebSocket API exposing the `IotVehicle` MySQL stored "
-        "procedures. All validation is enforced server-side.\n\n"
-        "**Errors** are always returned as "
-        "`{ \"error\": <code>, \"detail\": <message> }`."
+        "procedures. All validation is enforced server-side."
     ),
-    version="1.1.0",
+    version="1.2.0",
 )
 
 app.add_middleware(
@@ -38,6 +36,7 @@ app.include_router(commands.router)
 app.include_router(status.router)
 app.include_router(history.router)
 app.include_router(demos.router)
+app.include_router(ws_status.router)
 
 
 @app.get("/", tags=["Health"], summary="Service health check")
