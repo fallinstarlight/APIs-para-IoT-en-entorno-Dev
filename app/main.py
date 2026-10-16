@@ -1,32 +1,26 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .errors import register_exception_handlers
 from .routers import commands, demos, history, status, vehicles
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
+)
+logger = logging.getLogger("iotvehicule")
 
 app = FastAPI(
     title="IoT Vehicle API",
     description=(
-        "REST + WebSocket API exposing the `IotVehicle` MySQL stored procedures.\n\n"
-        "### Endpoints\n"
-        "- **Vehicles** – CRUD via `spCreateVehicle`, `spGetVehicles`, "
-        "`spGetVehicle`, `spUpdateVehicle`, `spDeleteVehicle`.\n"
-        "- **Commands** – CRUD via `spCreateCommand`, `spGetVehicleCommands`, "
-        "`spUpdateCommand`, `spDeleteCommand`.\n"
-        "- **Status** – `spUpdateStatus` (also writes to history unless "
-        "`source == 'DEMO'`) and `spGetStatus`.\n"
-        "- **History** – `spRegisterHistory` and `spGetHistory`.\n"
-        "- **Demos** – `spCreateDemo`, `spGetDemos`, `spUpdateDemo`, "
-        "`spDeleteDemo`, plus movement CRUD and a WebSocket runner at "
-        "`/demos/{demoId}/run`.\n\n"
-        "### Demo WebSocket protocol\n"
-        "Connect to `ws://<host>/demos/{demoId}/run`. The server emits:\n"
-        "- `demo_start` – `{ demoId, totalMovements, vehicleId }`\n"
-        "- `movement` – one per movement (id, command, durations)\n"
-        "- `status_updated` – after each `spUpdateStatus` (no history written)\n"
-        "- `pause` – before the inter-movement pause\n"
-        "- `demo_end` / `error`\n"
+        "REST + WebSocket API exposing the `IotVehicle` MySQL stored "
+        "procedures. All validation is enforced server-side.\n\n"
+        "**Errors** are always returned as "
+        "`{ \"error\": <code>, \"detail\": <message> }`."
     ),
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -36,6 +30,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+register_exception_handlers(app)
 
 app.include_router(vehicles.router)
 app.include_router(commands.router)

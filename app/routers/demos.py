@@ -1,9 +1,10 @@
 import asyncio
-import json
+import logging
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
-from ..database import call_procedure, call_procedure_no_result
+from ..database import call_procedure, call_procedure_no_result, procedure_exists
+from ..errors import BadRequest, Conflict, ResourceNotFound
 from ..schemas import (
     Demo,
     DemoCreate,
@@ -12,30 +13,51 @@ from ..schemas import (
     DemoMovementUpdate,
     DemoUpdate,
 )
-from ..websocket_manager import manager
+from ..websocket_manager import (
+    WS_CLOSE_INTERNAL,
+    ChannelBusyError,
+    manager,
+)
+
+logger = logging.getLogger("iotvehicule.demos")
 
 router = APIRouter(prefix="/demos", tags=["Demos"])
 
+# The optional procedure used by the WS runner to resolve the parent vehicle.
+_HAS_GET_DEMO_VEHICLE = procedure_exists("spGetDemoVehicleId")
 
-# ------------------ CRUD ------------------
-@router.post("", status_code=status.HTTP_201_CREATED, summary="spCreateDemo")
+
+# --------------------------- CRUD: demos ----------------------------------
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=dict,
+    summary="spCreateDemo",
+)
 def create_demo(payload: DemoCreate):
     rows = call_procedure(
         "spCreateDemo", [payload.vehicleId, payload.name, payload.description]
     )
-    if not rows:
-        raise HTTPException(status_code=500, detail="Demo could not be created")
+    if not rows or "demoId" not in rows[0]:
+        raise Conflict("Demo could not be created")
     return rows[0]
 
 
-@router.get("/vehicle/{vehicle_id}", response_model=list[Demo],
-            summary="spGetDemos")
+@router.get(
+    "/vehicle/{vehicle_id}",
+    response_model=list[Demo],
+    summary="spGetDemos",
+)
 def list_demos(vehicle_id: int):
+    if vehicle_id <= 0:
+        raise BadRequest("vehicle_id must be a positive integer")
     return call_procedure("spGetDemos", [vehicle_id])
 
 
 @router.put("/{demo_id}", summary="spUpdateDemo")
 def update_demo(demo_id: int, payload: DemoUpdate):
+    if demo_id <= 0:
+        raise BadRequest("demo_id must be a positive integer")
     call_procedure_no_result(
         "spUpdateDemo",
         [demo_id, payload.name, payload.description, payload.isActive],
@@ -45,73 +67,122 @@ def update_demo(demo_id: int, payload: DemoUpdate):
 
 @router.delete("/{demo_id}", summary="spDeleteDemo")
 def delete_demo(demo_id: int):
+    if demo_id <= 0:
+        raise BadRequest("demo_id must be a positive integer")
     call_procedure_no_result("spDeleteDemo", [demo_id])
     return {"status": "ok", "demoId": demo_id}
 
 
-# ------------------ Movements ------------------
-@router.post("/movements", status_code=status.HTTP_201_CREATED,
-             summary="spAddDemoMovement")
+# --------------------------- CRUD: movements ------------------------------
+@router.post(
+    "/movements",
+    status_code=status.HTTP_201_CREATED,
+    summary="spAddDemoMovement",
+)
 def add_demo_movement(payload: DemoMovementCreate):
     call_procedure_no_result(
         "spAddDemoMovement",
-        [payload.demoId, payload.commandId, payload.sortOrder,
-         payload.durationMs, payload.pauseMs],
+        [
+            payload.demoId,
+            payload.commandId,
+            payload.sortOrder,
+            payload.durationMs,
+            payload.pauseMs,
+        ],
     )
     return {"status": "ok"}
 
 
-@router.get("/{demo_id}/movements", response_model=list[DemoMovement],
-            summary="spGetDemoMovements")
+@router.get(
+    "/{demo_id}/movements",
+    response_model=list[DemoMovement],
+    summary="spGetDemoMovements",
+)
 def get_demo_movements(demo_id: int):
+    if demo_id <= 0:
+        raise BadRequest("demo_id must be a positive integer")
     return call_procedure("spGetDemoMovements", [demo_id])
 
 
 @router.put("/movements/{movement_id}", summary="spUpdateDemoMovement")
 def update_demo_movement(movement_id: int, payload: DemoMovementUpdate):
+    if movement_id <= 0:
+        raise BadRequest("movement_id must be a positive integer")
     call_procedure_no_result(
         "spUpdateDemoMovement",
-        [movement_id, payload.commandId, payload.sortOrder,
-         payload.durationMs, payload.pauseMs],
+        [
+            movement_id,
+            payload.commandId,
+            payload.sortOrder,
+            payload.durationMs,
+            payload.pauseMs,
+        ],
     )
     return {"status": "ok", "demoMovementId": movement_id}
 
 
 @router.delete("/movements/{movement_id}", summary="spDeleteDemoMovement")
 def delete_demo_movement(movement_id: int):
+    if movement_id <= 0:
+        raise BadRequest("movement_id must be a positive integer")
     call_procedure_no_result("spDeleteDemoMovement", [movement_id])
     return {"status": "ok", "demoMovementId": movement_id}
 
 
-# ------------------ Run Demo (WebSocket) ------------------
+# --------------------------- WS runner ------------------------------------
+def _resolve_vehicle_id(demo_id: int) -> int | None:
+    """Resolve the parent vehicle of a demo, if possible."""
+    if _HAS_GET_DEMO_VEHICLE:
+        rows = call_procedure("spGetDemoVehicleId", [demo_id])
+        if rows and "vehicleId" in rows[0]:
+            return int(rows[0]["vehicleId"])
+    # Fallback: scan all vehicles' demos.
+    try:
+        vehicles = call_procedure("spGetVehicles")
+        for v in vehicles:
+            v_id = v.get("vehicleId")
+            if v_id is None:
+                continue
+            demos = call_procedure("spGetDemos", [v_id])
+            if any(d.get("demoId") == demo_id for d in demos):
+                return int(v_id)
+    except Exception:
+        logger.warning("Fallback vehicle lookup failed for demo %s", demo_id,
+                       exc_info=True)
+    return None
+
+
 @router.websocket("/{demo_id}/run")
 async def run_demo(ws: WebSocket, demo_id: int):
     """
-    Execute a demo sequence.
-
-    1. Loads all movements via `spGetDemoMovements`.
-    2. Streams each movement to the client over the WebSocket, one by one.
-    3. For each movement it calls `spUpdateStatus` (no history entry),
-       so the hardware/observer sees the current command during the
-       movement's duration.
-    4. Sleeps `durationMs` and then `pauseMs` before moving on.
+    Execute a demo sequence over WebSocket. Only one client per demo is
+    allowed at a time; concurrent connections are rejected with code 4001.
     """
+    if demo_id <= 0:
+        await ws.accept()
+        await ws.close(code=WS_CLOSE_INTERNAL, reason="invalid demo id")
+        return
+
     channel = f"demo:{demo_id}"
-    await manager.connect(channel, ws)
+    try:
+        await manager.connect(channel, ws)
+    except ChannelBusyError:
+        return  # socket already closed by manager
 
     try:
+        # Validate the demo exists.
         movements = call_procedure("spGetDemoMovements", [demo_id])
+        vehicle_id = _resolve_vehicle_id(demo_id)
 
-        # We need the vehicle id: derive it from the demo row.
-        # `spGetDemos` returns demos for a vehicle, but here we only have demoId.
-        # A tiny helper: query it directly via a dedicated procedure is not
-        # available, so we fetch the demo via the demoId using the existing
-        # `spGetDemos` on the parent vehicle. Instead, we just accept it as
-        # a query parameter for the WS, but to keep the spec simple we look it
-        # up with a lightweight inline procedure call.
-        vehicle_rows = call_procedure("spGetDemoVehicleId", [demo_id]) \
-            if _procedure_exists("spGetDemoVehicleId") else []
-        vehicle_id = vehicle_rows[0]["vehicleId"] if vehicle_rows else None
+        if vehicle_id is None:
+            # Can't drive status updates without a vehicle.
+            await ws.send_json({
+                "event": "error",
+                "detail": f"Demo {demo_id} has no resolvable vehicle",
+            })
+            await ws.close(code=WS_CLOSE_INTERNAL,
+                           reason="demo has no vehicle")
+            return
 
         await ws.send_json({
             "event": "demo_start",
@@ -121,57 +192,49 @@ async def run_demo(ws: WebSocket, demo_id: int):
         })
 
         for mv in movements:
+            # Defensive: procedures should return these keys.
+            if "commandId" not in mv or "durationMs" not in mv:
+                raise RuntimeError(
+                    f"Malformed movement for demo {demo_id}: {mv!r}"
+                )
+
             await ws.send_json({"event": "movement", **mv})
 
-            if vehicle_id is not None:
-                # No history entry for demo movements.
-                call_procedure_no_result(
-                    "spUpdateStatus",
-                    [vehicle_id, mv["commandId"], True],
-                )
-                await ws.send_json({
-                    "event": "status_updated",
-                    "vehicleId": vehicle_id,
-                    "commandId": mv["commandId"],
-                    "isConnected": True,
-                })
+            call_procedure_no_result(
+                "spUpdateStatus",
+                [vehicle_id, mv["commandId"], True],
+            )
+            await ws.send_json({
+                "event": "status_updated",
+                "vehicleId": vehicle_id,
+                "commandId": mv["commandId"],
+                "isConnected": True,
+            })
 
-            await asyncio.sleep(mv["durationMs"] / 1000.0)
+            await asyncio.sleep(max(mv["durationMs"], 0) / 1000.0)
 
-            if mv["pauseMs"]:
+            pause = mv.get("pauseMs") or 0
+            if pause:
                 await ws.send_json({
                     "event": "pause",
-                    "demoMovementId": mv["demoMovementId"],
-                    "pauseMs": mv["pauseMs"],
+                    "demoMovementId": mv.get("demoMovementId"),
+                    "pauseMs": pause,
                 })
-                await asyncio.sleep(mv["pauseMs"] / 1000.0)
+                await asyncio.sleep(pause / 1000.0)
 
         await ws.send_json({"event": "demo_end", "demoId": demo_id})
 
     except WebSocketDisconnect:
-        pass
+        logger.info("Demo %s client disconnected", demo_id)
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Demo %s run failed", demo_id)
         try:
             await ws.send_json({"event": "error", "detail": str(exc)})
-        except Exception:  # noqa: BLE001
+        except Exception:
+            pass
+        try:
+            await ws.close(code=WS_CLOSE_INTERNAL, reason="run failed")
+        except Exception:
             pass
     finally:
-        manager.disconnect(channel, ws)
-
-
-def _procedure_exists(name: str) -> bool:
-    """Check if a stored procedure exists (used to keep backward compat)."""
-    from ..database import get_connection
-    try:
-        with get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(*) FROM information_schema.ROUTINES "
-                "WHERE ROUTINE_SCHEMA = DATABASE() AND ROUTINE_NAME = %s",
-                (name,),
-            )
-            (count,) = cur.fetchone()
-            cur.close()
-            return count > 0
-    except Exception:  # noqa: BLE001
-        return False
+        await manager.disconnect(channel, ws)
