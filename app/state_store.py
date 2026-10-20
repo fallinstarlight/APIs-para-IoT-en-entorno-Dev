@@ -1,4 +1,4 @@
-"""In-memory, per-vehicle runtime state, published on a global bus."""
+"""In-memory, per-vehicle runtime state, published per-vehicle channel."""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,6 @@ from .websocket_manager import manager
 
 logger = logging.getLogger("iotvehicule.state")
 
-GLOBAL_CHANNEL = "status:all"
 vehicle_channel = lambda vid: f"vehicle:{vid}"  # noqa: E731
 
 
@@ -49,9 +48,6 @@ class VehicleStateStore:
     # ------------------------------------------------------------------ read
     def get_cached(self, vehicle_id: int) -> Optional[VehicleState]:
         return self._states.get(vehicle_id)
-
-    def snapshot(self) -> list[dict]:
-        return [s.to_dict() for s in self._states.values()]
 
     def get_or_hydrate(self, vehicle_id: int) -> VehicleState:
         cached = self._states.get(vehicle_id)
@@ -107,9 +103,10 @@ class VehicleStateStore:
             )
             self._states[vehicle_id] = state
 
-        payload = {"event": "state", **state.to_dict()}
-        await manager.broadcast(GLOBAL_CHANNEL, payload)
-        await manager.broadcast(vehicle_channel(vehicle_id), payload)
+        await manager.broadcast(
+            vehicle_channel(vehicle_id),
+            {"event": "state", **state.to_dict()},
+        )
         return state
 
 

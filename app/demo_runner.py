@@ -1,7 +1,7 @@
 """Background demo executor.
 
-Runs demos as asyncio tasks. Everything it emits goes on the global bus,
-so any client connected to `WS /ws/status` sees it in real time.
+Demo events are broadcast on the vehicle's own channel, so only the
+client watching that vehicle sees them.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 
 from .database import call_procedure, call_procedure_no_result
-from .state_store import GLOBAL_CHANNEL, store
+from .state_store import store, vehicle_channel
 from .websocket_manager import manager
 
 logger = logging.getLogger("iotvehicule.demo_runner")
@@ -86,8 +86,9 @@ def _prepare(demo_id: int) -> tuple[int, list[dict]]:
 
 
 async def _run(demo_id: int, vehicle_id: int, movements: list[dict]) -> None:
+    chan = vehicle_channel(vehicle_id)
     try:
-        await manager.broadcast(GLOBAL_CHANNEL, {
+        await manager.broadcast(chan, {
             "event": "demo_start",
             "demoId": demo_id,
             "vehicleId": vehicle_id,
@@ -95,7 +96,7 @@ async def _run(demo_id: int, vehicle_id: int, movements: list[dict]) -> None:
         })
 
         for mv in movements:
-            await manager.broadcast(GLOBAL_CHANNEL, {
+            await manager.broadcast(chan, {
                 "event": "movement",
                 "demoId": demo_id,
                 "vehicleId": vehicle_id,
@@ -119,7 +120,7 @@ async def _run(demo_id: int, vehicle_id: int, movements: list[dict]) -> None:
 
             pause = mv.get("pauseMs") or 0
             if pause:
-                await manager.broadcast(GLOBAL_CHANNEL, {
+                await manager.broadcast(chan, {
                     "event": "pause",
                     "demoId": demo_id,
                     "vehicleId": vehicle_id,
@@ -128,14 +129,14 @@ async def _run(demo_id: int, vehicle_id: int, movements: list[dict]) -> None:
                 })
                 await asyncio.sleep(pause / 1000.0)
 
-        await manager.broadcast(GLOBAL_CHANNEL, {
+        await manager.broadcast(chan, {
             "event": "demo_end",
             "demoId": demo_id,
             "vehicleId": vehicle_id,
         })
 
     except asyncio.CancelledError:
-        await manager.broadcast(GLOBAL_CHANNEL, {
+        await manager.broadcast(chan, {
             "event": "demo_end",
             "demoId": demo_id,
             "vehicleId": vehicle_id,
@@ -144,7 +145,7 @@ async def _run(demo_id: int, vehicle_id: int, movements: list[dict]) -> None:
         raise
     except Exception as exc:
         logger.exception("Demo %s failed", demo_id)
-        await manager.broadcast(GLOBAL_CHANNEL, {
+        await manager.broadcast(chan, {
             "event": "demo_error",
             "demoId": demo_id,
             "vehicleId": vehicle_id,
