@@ -1,19 +1,6 @@
-# Implementación de stored procedures usando una API REST para controlar un vehículo a control remoto
-
-## Controlador Wi-Fi y página web
-
-La integración nueva está en `firmware/VehicleRemote/VehicleRemote.ino` y la interfaz
-amarilla/negra en `web/index.html`. La API Python y los sketches originales se conservan
-sin cambios. Consulta [la guía de instalación, cableado y uso](docs/INTEGRATION.md).
-
-Abre `web/index.html` directamente y configura la API en **Menu → Connection**.
-
-Este programa controla las llamadas a los prcoedimientos dentro de un esquema de base de datos.
-Dicho esquema se encarga de guardar los registros de los movimientos realizados por un carro a control remoto manejado a través de WiFi con una ESP8266.
-La base de datos guarda, entre otras cosas, el vehículo en sí, es decir, su modelo, id, descripción, etcétera.
-También guarda los movimietnos asociados a ese vehículo y el código que les representa, como Avanzar, Retroceder, Girar a la izquierda o derecha, entre otros. Existe una tabla llamada demos, las cual almacena una demostración de varios movimietos que se ejecutan en sucesión.
-
-En general los procedimientos se encargan de controlar qué comandos se envían, actualizan el historial de comandos que se han ejecutado, permiten guardar, editar o elminar comandos, entre otras cosas más. 
-
-La aplicación usa una REST API con métodos HTTP para controlar dichos procedimientos desde un cliente web.
-La mayoría de procedimientos se ejecutan de esta forma, sin embargo, en el caso de los demos, estos se ejecutan a través de un websocket que va mostrando el estado actual del demo, es decir, en qué comando se encuentra.
+# API de control de un vehículo IoT
+Esta aplicación de Python se encarga de recibir solicitudes relacionadas al control de un vehículo que funciona a través de internet.
+Cuenta con 21 endpoints que reflejan 21 procedimientos almacenados de una base de datos MySQL. Estos procedimientos se encargan de todo tipo de operaciones CRUD relacionadas al control de este vehículo, como la definición del vehículo en sí, los comandos que se puedan ejecutar en él, el control de demos y el registro de estados de movimiento dentro de un historial.
+La parte más importante de esta API es la del control de estado, un endpoint en el que se envía un comando usando un código numérico que lo identifica. Un websocket se comunicará entonces a un microcontrolador ESP y, con base en el comando recibido, hará que el vehículo ejecute acciones diferentes.
+La comunicación con esta API se hace a través de métodos HTTP con cuerpos en formato JSON.
+Este repo cuenta además con el firmware usado en la ESP para recibir información del websocket de la API y con ello ejecutar los comandos en el vehículo físico. 
