@@ -1,4 +1,13 @@
 # Implementación de stored procedures usando una API REST para controlar un vehículo a control remoto
+
+## Controlador Wi-Fi y página web
+
+La integración nueva está en `firmware/VehicleRemote/VehicleRemote.ino` y la interfaz
+amarilla/negra en `web/index.html`. La API Python y los sketches originales se conservan
+sin cambios. Consulta [la guía de instalación, cableado y uso](docs/INTEGRATION.md).
+
+Abre `web/index.html` directamente y configura la API en **Menu → Connection**.
+
 Este programa controla las llamadas a los prcoedimientos dentro de un esquema de base de datos.
 Dicho esquema se encarga de guardar los registros de los movimientos realizados por un carro a control remoto manejado a través de WiFi con una ESP8266.
 La base de datos guarda, entre otras cosas, el vehículo en sí, es decir, su modelo, id, descripción, etcétera.
