@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from ..database import call_procedure, call_procedure_no_result
 from ..errors import BadRequest, ResourceNotFound
+from ..demo_runner import stop_demo
 from ..schemas import Status, StatusUpdate
 from ..state_store import store
 
@@ -31,14 +32,14 @@ async def update_status(payload: StatusUpdate):
     command_name = None
     code = None
     if payload.commandId is not None:
-        try:
-            for c in call_procedure("spGetVehicleCommands", [payload.vehicleId]):
-                if c.get("commandId") == payload.commandId:
-                    command_name = c.get("name")
-                    code = c.get("code")
-                    break
-        except Exception:
-            pass
+        for c in call_procedure("spGetVehicleCommands", [payload.vehicleId]):
+            if c.get("commandId") == payload.commandId:
+                command_name = c.get("name")
+                code = c.get("code")
+                break
+
+    if code == 0 or payload.commandId is None:
+        await stop_demo(payload.vehicleId)
 
     await store.set(
         payload.vehicleId,

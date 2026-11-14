@@ -61,13 +61,12 @@ It does not implement WSS/certificate configuration for an Internet-hosted API.
 
 ## 3. Open the web controller
 
-Open `web/index.html` directly. The page uses relative CSS and JavaScript files.
-To publish on GitHub Pages, deploy the contents of `web/` together. Set the reachable
-API URL and vehicle ID in **Menu → Connection**. For HTTPS hosting, use an HTTPS
-API address that the phone can reach and that permits cross-origin browser requests.
+Open `../web/index.html` from the sibling web project. To publish on GitHub Pages,
+deploy its contents together. The controller connects automatically to
+`https://indiscipline-haul-truck.duckdns.org/`. Select the ESP's vehicle ID in **Menu → Connection**.
 
 Drag the left stick to drive or the right lever to raise/lower the load. Release to
-send STOP. Lights and sound send one toggle followed by STOP after the 500 ms pulse.
+send STOP. Lights and sound send one toggle. The firmware ends the 500 ms pulse locally.
 Select a demo on the remote and press **Run demo**. Keyboard users can hold a direction
 key on the drive stick or an up/down arrow on the load lever and release it to stop.
 
@@ -80,10 +79,11 @@ key on the drive stick or an up/down arrow on the load lever and release it to s
 - Requests use `fetch` AJAX. `/status` already registers manual history, so the control
   buttons do not separately call `/history` and create duplicate records.
 
-The browser deliberately **does not open a WebSocket**. The API permits one socket
-per vehicle and two sockets in total; the ESP needs that subscription. Close other
-WebSocket test clients for the same vehicle before connecting the ESP. The page
-polls `GET /status/{vehicle_id}` every 2 seconds and labels it **API status**.
+The browser loads initial status through REST and subscribes to
+`/ws/status/{vehicle_id}` alongside the ESP and other controllers. Each
+subscriber receives a snapshot on connection and subsequent vehicle events.
+API and database reachability are checked separately through `/` and
+`/health/database`.
 
 ## Command and timing contract
 
@@ -147,7 +147,7 @@ these features reliably would require a separately agreed API/protocol change.
 ## Verification
 
 ```powershell
-node --check web/app.js
+node --check ../web/assets/app.js
 node --test tests/web_test.cjs
 New-Item -ItemType Directory -Force .build | Out-Null
 g++ -std=c++11 -Wall -Wextra tests/vehicle_logic_test.cpp -o .build/vehicle_logic_test.exe
@@ -164,9 +164,7 @@ actual vehicle before relying on the integration.
 For an isolated check using the actual Python routes with an in-memory database,
 run `.carrito/Scripts/python.exe tests/preview_api.py` in one terminal, then
 `.carrito/Scripts/python.exe tests/api_smoke.py` in another. This fixture listens
-only on `127.0.0.1:8766`, never connects to MySQL, and resets when stopped. You can
-temporarily point the web page at that address to test its controls without hardware.
-Restore the production API address after testing.
+only on `127.0.0.1:8766`, never connects to MySQL, and resets when stopped.
 
 Verified during implementation: ESP8266 NodeMCU compilation with core 3.1.2 and the
 library versions above; C++ policy tests; six JS request tests; the real API protocol

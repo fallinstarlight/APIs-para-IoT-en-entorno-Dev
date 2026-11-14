@@ -1,8 +1,8 @@
 #pragma once
 
 // Address of the computer running uvicorn. Do not use localhost/127.0.0.1.
-constexpr char API_HOST[] = "54.165.156.220";
-constexpr uint16_t API_PORT = 8000;
+constexpr char API_HOST[] = "indiscipline-haul-truck.duckdns.org";
+constexpr uint16_t API_PORT = 443;
 constexpr uint32_t VEHICLE_ID = 1;
 constexpr char PORTAL_PASSWORD[] = "Starlight65_";
 

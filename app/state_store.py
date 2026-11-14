@@ -59,7 +59,7 @@ class VehicleStateStore:
         except Exception:
             logger.warning("Could not hydrate vehicle %s", vehicle_id,
                            exc_info=True)
-            rows = []
+            return VehicleState(vehicleId=vehicle_id)
 
         if rows:
             r = rows[0]
@@ -76,8 +76,7 @@ class VehicleStateStore:
         else:
             state = VehicleState(vehicleId=vehicle_id)
 
-        self._states[vehicle_id] = state
-        return state
+        return self._states.setdefault(vehicle_id, state)
 
     # ----------------------------------------------------------------- write
     async def set(

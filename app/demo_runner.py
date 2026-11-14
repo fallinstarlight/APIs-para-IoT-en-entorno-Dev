@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from .database import call_procedure, call_procedure_no_result
+from .database import ConnectionFailure, call_procedure, call_procedure_no_result
 from .state_store import store, vehicle_channel
 from .websocket_manager import manager
 
@@ -27,6 +27,18 @@ class DemoNotFound(Exception):
     pass
 
 
+_vehicles: dict[int, asyncio.Task] = {}
+
+def vehicle_demo_active(vehicle_id):
+    task = _vehicles.get(vehicle_id)
+    return task is not None and not task.done()
+
+async def stop_demo(vehicle_id):
+    if vehicle_demo_active(vehicle_id):
+        task = _vehicles[vehicle_id]
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
 async def start_demo(demo_id: int) -> dict:
     async with _running_lock:
         existing = _running.get(demo_id)
@@ -34,7 +46,10 @@ async def start_demo(demo_id: int) -> dict:
             raise DemoAlreadyRunning(f"Demo {demo_id} is already running")
 
         vehicle_id, movements = _prepare(demo_id)
+        if vehicle_demo_active(vehicle_id):
+            raise DemoAlreadyRunning("Vehicle is playing a demo")
         task = asyncio.create_task(_run(demo_id, vehicle_id, movements))
+        _vehicles[vehicle_id] = task
         _running[demo_id] = task
         task.add_done_callback(lambda _t, d=demo_id: _running.pop(d, None))
 
@@ -56,6 +71,8 @@ def _resolve_vehicle_id(demo_id: int) -> Optional[int]:
         rows = call_procedure("spGetDemoVehicleId", [demo_id])
         if rows and "vehicleId" in rows[0]:
             return int(rows[0]["vehicleId"])
+    except ConnectionFailure:
+        raise
     except Exception:
         pass
     try:
@@ -66,6 +83,8 @@ def _resolve_vehicle_id(demo_id: int) -> Optional[int]:
             for d in call_procedure("spGetDemos", [vid]):
                 if d.get("demoId") == demo_id:
                     return int(vid)
+    except ConnectionFailure:
+        raise
     except Exception:
         logger.warning("Vehicle lookup failed for demo %s", demo_id,
                        exc_info=True)

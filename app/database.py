@@ -75,7 +75,7 @@ def get_connection():
         conn = mysql.connector.connect(**DB_CONFIG)
     except MySQLError as exc:
         logger.exception("MySQL connection failed")
-        raise ConnectionFailure("Database is unreachable") from exc
+        raise ConnectionFailure("no database available") from exc
 
     try:
         yield conn
@@ -162,7 +162,7 @@ def _translate_mysql_error(exc: MySQLError, proc_name: str) -> DatabaseError:
         errorcode.ER_ACCESS_DENIED_ERROR,
         errorcode.ER_BAD_DB_ERROR,
     ):
-        return ConnectionFailure("Database is unreachable")
+        return ConnectionFailure("no database available")
 
     logger.exception("Unmapped MySQL error in %s (errno=%s)", proc_name, code)
     return StoredProcedureError(f"Database error while calling {proc_name}")

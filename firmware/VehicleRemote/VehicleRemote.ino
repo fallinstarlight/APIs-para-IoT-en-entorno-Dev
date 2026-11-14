@@ -178,7 +178,7 @@ void monitorConnection() {
       if (wifiManager.getConfigPortalActive()) wifiManager.stopConfigPortal();
       WiFi.setAutoReconnect(true);
       // Reinitialize the endpoint after a Wi-Fi outage.
-      webSocket.begin(API_HOST, API_PORT, socketPath, "");
+      webSocket.beginSslWithCA(API_HOST, API_PORT, socketPath, ROOT_CA_PEM, "");
       webSocket.setReconnectInterval(WS_RECONNECT_MS);
       socketStarted = true;
       lastReportAt = now;

@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .database import get_connection
 from .errors import register_exception_handlers
 from .routers import commands, demos, history, status, vehicles, ws_status
 
@@ -42,3 +43,8 @@ app.include_router(ws_status.router)
 @app.get("/", tags=["Health"], summary="Service health check")
 def root():
     return {"status": "ok", "service": "IoT Vehicle API"}
+
+@app.get("/health/database", tags=["Health"])
+def database_health():
+    with get_connection():
+        return {"status": "ok"}
