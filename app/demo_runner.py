@@ -10,6 +10,7 @@ import logging
 from typing import Optional
 
 from .database import ConnectionFailure, call_procedure, call_procedure_no_result
+from .database import create_temporary_demo, delete_temporary_demo, temporary_demo_ids
 from .state_store import store, vehicle_channel
 from .websocket_manager import manager
 
@@ -17,6 +18,7 @@ logger = logging.getLogger("iotvehicule.demo_runner")
 
 _running: dict[int, asyncio.Task] = {}
 _running_lock = asyncio.Lock()
+_planning: dict[int, object] = {}
 
 
 class DemoAlreadyRunning(Exception):
@@ -34,6 +36,7 @@ def vehicle_demo_active(vehicle_id):
     return task is not None and not task.done()
 
 async def stop_demo(vehicle_id):
+    _planning.pop(vehicle_id, None)
     if vehicle_demo_active(vehicle_id):
         task = _vehicles[vehicle_id]
         task.cancel()
@@ -48,11 +51,25 @@ async def start_demo(demo_id: int) -> dict:
         vehicle_id, movements = _prepare(demo_id)
         if vehicle_demo_active(vehicle_id):
             raise DemoAlreadyRunning("Vehicle is playing a demo")
-        task = asyncio.create_task(_run(demo_id, vehicle_id, movements))
-        _vehicles[vehicle_id] = task
-        _running[demo_id] = task
-        task.add_done_callback(lambda _t, d=demo_id: _running.pop(d, None))
+        return _launch(demo_id, vehicle_id, movements)
 
+
+def _launch(demo_id, vehicle_id, movements, temporary=False):
+    task = asyncio.create_task(_run(demo_id, vehicle_id, movements))
+    _vehicles[vehicle_id] = task
+    _running[demo_id] = task
+
+    def finished(completed):
+        if _vehicles.get(vehicle_id) is completed:
+            _vehicles.pop(vehicle_id)
+        _running.pop(demo_id, None)
+        if temporary:
+            try:
+                delete_temporary_demo(demo_id)
+            except Exception:
+                logger.exception("Temporary demo %s queued for cleanup", demo_id)
+
+    task.add_done_callback(finished)
     return {
         "demoId": demo_id,
         "vehicleId": vehicle_id,
@@ -170,3 +187,35 @@ async def _run(demo_id: int, vehicle_id: int, movements: list[dict]) -> None:
             "vehicleId": vehicle_id,
             "detail": str(exc),
         })
+
+async def run_voice_demo(vehicle_id, transcript):
+    from .llm_control import interpret
+
+    if vehicle_demo_active(vehicle_id) or vehicle_id in _planning:
+        raise DemoAlreadyRunning("Vehicle is already planning or playing a demo")
+    token = object()
+    initial = store.get_cached(vehicle_id)
+    _planning[vehicle_id] = token
+    try:
+        steps = await asyncio.to_thread(interpret, transcript)
+        async with _running_lock:
+            if (_planning.get(vehicle_id) is not token or vehicle_demo_active(vehicle_id)
+                    or store.get_cached(vehicle_id) is not initial):
+                raise DemoAlreadyRunning("Vehicle state changed while planning")
+            demo_id, movements = create_temporary_demo(vehicle_id, steps)
+            return _launch(demo_id, vehicle_id, movements, temporary=True)
+    finally:
+        if _planning.get(vehicle_id) is token:
+            _planning.pop(vehicle_id)
+
+
+async def recover_temporary_demos():
+    """Recover rows left by a process restart or a failed completion cleanup."""
+    while True:
+        try:
+            for demo_id in await asyncio.to_thread(temporary_demo_ids):
+                if not is_running(demo_id):
+                    await asyncio.to_thread(delete_temporary_demo, demo_id)
+        except Exception:
+            logger.warning("Temporary demo cleanup unavailable; will retry")
+        await asyncio.sleep(60)

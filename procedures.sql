@@ -143,7 +143,7 @@ END$$
 CREATE PROCEDURE spGetDemos(IN pVehicleId INT)
 BEGIN
     SELECT * FROM demos
-     WHERE vehicleId=pVehicleId
+     WHERE vehicleId=pVehicleId AND isTemporary=0
      ORDER BY demoId;
 END$$
 

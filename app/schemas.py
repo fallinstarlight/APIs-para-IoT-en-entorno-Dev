@@ -233,3 +233,7 @@ class DemoMovement(BaseModel):
     code: Optional[int] = None
     durationMs: int
     pauseMs: int
+
+class VoiceDemoRequest(BaseModel):
+    vehicleId: int = Field(gt=0)
+    transcript: str = Field(min_length=1)

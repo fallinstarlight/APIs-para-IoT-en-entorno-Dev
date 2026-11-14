@@ -13,7 +13,9 @@
 #include <WiFiManager.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
+#include <time.h>
 #include "config.h"
+#include "TlsRoot.h"
 #include "VehicleLogic.h"
 
 static_assert(SER_PIN != WIFI_RESET_PIN && SRCLK_PIN != WIFI_RESET_PIN &&
@@ -102,7 +104,7 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       awaitingSnapshot = true;
       lastPingAt = lastPongAt = millis();
       stopVehicle("WebSocket connected; synchronizing");
-      Serial.printf("WebSocket connected: ws://%s:%u%s\n", API_HOST, API_PORT, socketPath);
+      Serial.printf("WebSocket connected: wss://%s:%u%s\n", API_HOST, API_PORT, socketPath);
       webSocket.sendTXT("ping");
       break;
     case WStype_DISCONNECTED:
@@ -177,10 +179,8 @@ void monitorConnection() {
     if (status == WL_CONNECTED) {
       if (wifiManager.getConfigPortalActive()) wifiManager.stopConfigPortal();
       WiFi.setAutoReconnect(true);
-      // Reinitialize the endpoint after a Wi-Fi outage.
-      webSocket.beginSslWithCA(API_HOST, API_PORT, socketPath, ROOT_CA_PEM, "");
-      webSocket.setReconnectInterval(WS_RECONNECT_MS);
-      socketStarted = true;
+      configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
+      Serial.println("Waiting for network time before WSS...");
       lastReportAt = now;
     } else if (previousWifiStatus == WL_CONNECTED) {
       stopVehicle("Wi-Fi lost");
@@ -192,6 +192,16 @@ void monitorConnection() {
     previousWifiStatus = status;
   }
   if (status == WL_CONNECTED) {
+    if (!socketStarted && time(nullptr) >= 1704067200) {
+#if defined(ESP8266)
+      static BearSSL::X509List trustAnchor(ROOT_CA_PEM);
+      webSocket.beginSslWithCA(API_HOST, API_PORT, socketPath, &trustAnchor, "");
+#else
+      webSocket.beginSslWithCA(API_HOST, API_PORT, socketPath, ROOT_CA_PEM, "");
+#endif
+      webSocket.setReconnectInterval(WS_RECONNECT_MS);
+      socketStarted = true;
+    }
     if (static_cast<uint32_t>(now - lastReportAt) >= 60000) {
       printConnectionInfo(); lastReportAt = now;
     }

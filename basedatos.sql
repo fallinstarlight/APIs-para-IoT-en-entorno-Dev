@@ -63,6 +63,7 @@ CREATE TABLE demos (
     name VARCHAR(80) NOT NULL,
     description VARCHAR(255),
     isActive BOOLEAN NOT NULL DEFAULT TRUE,
+    isTemporary BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT fkDemoVehicle
       FOREIGN KEY (vehicleId) REFERENCES vehicles(vehicleId)
       ON DELETE CASCADE ON UPDATE CASCADE

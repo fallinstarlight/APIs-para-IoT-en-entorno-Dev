@@ -1,6 +1,6 @@
 #pragma once
 
-// Address of the computer running uvicorn. Do not use localhost/127.0.0.1.
+// Public hostname on Caddy's TLS certificate.
 constexpr char API_HOST[] = "indiscipline-haul-truck.duckdns.org";
 constexpr uint16_t API_PORT = 443;
 constexpr uint32_t VEHICLE_ID = 1;

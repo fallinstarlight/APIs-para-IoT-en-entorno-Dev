@@ -1,0 +1,9 @@
+USE IotVehicle;
+ALTER TABLE demos ADD COLUMN isTemporary BOOLEAN NOT NULL DEFAULT FALSE;
+DROP PROCEDURE IF EXISTS spGetDemos;
+DELIMITER $$
+CREATE PROCEDURE spGetDemos(IN pVehicleId INT)
+BEGIN
+    SELECT * FROM demos WHERE vehicleId=pVehicleId AND isTemporary=0 ORDER BY demoId;
+END$$
+DELIMITER ;

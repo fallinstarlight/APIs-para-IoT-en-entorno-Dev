@@ -10,9 +10,9 @@ compiling the original two sketches together creates duplicate `setup()` / `loop
    NodeMCU, select **NodeMCU 1.0 (ESP-12E Module)** with ESP8266 core 3.1.2.
 2. Install **WiFiManager by tzapu 2.0.17**, **WebSockets by Markus Sattler 2.6.1**,
    and **ArduinoJson by Benoit Blanchon 7.4.2** through Library Manager.
-3. Edit `firmware/VehicleRemote/config.h`: set `API_HOST` to the API computer's LAN IP,
-   `API_PORT` (8000 by default), and `VEHICLE_ID` to an existing database vehicle.
-   `API_HOST` is only a hostname/IP, without `http://`, a port or a path.
+3. In `firmware/VehicleRemote/config.h`, use Caddy's public DNS hostname for
+   `API_HOST`, port 443 for `API_PORT`, and an existing vehicle's ID for
+   `VEHICLE_ID`. Enter the hostname without a scheme, port or path.
 4. Check the wiring below, upload the merged sketch, and open Serial Monitor at **115200**.
 5. With no saved Wi-Fi, connect a phone to **INDISCIPLINE-xxxxxx**, password
    **Starlight65_** (configurable in `config.h`). Open **http://192.168.4.1** and use
@@ -50,14 +50,14 @@ If setting up a new database, use the existing SQL scripts; do not rerun sample
 inserts against an already populated database.
 
 ```powershell
-.carrito/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+.carrito/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 Use **one worker**: the API's WebSocket registry and demo state are in memory.
-Allow port 8000 through the computer's firewall on your local network. The ESP
-and API must be able to reach each other; Internet access is not required for LAN use.
-The sketch uses `ws://HOST:PORT/ws/status/VEHICLE_ID` (plain WebSocket for the LAN).
-It does not implement WSS/certificate configuration for an Internet-hosted API.
+Caddy handles public HTTPS and WSS on port 443 and proxies to Uvicorn on
+127.0.0.1:8000. The ESP uses the DNS hostname in config.h and connects to
+`wss://HOST/ws/status/VEHICLE_ID`. After Wi-Fi connects, it waits for NTP
+before validating the certificate against ISRG Root X1 in TlsRoot.h.
 
 ## 3. Open the web controller
 
@@ -175,3 +175,26 @@ compilation and physical vehicle behavior have not been verified in this environ
 Library references: [WiFiManager](https://github.com/tzapu/WiFiManager),
 [WebSocketsClient](https://github.com/Links2004/arduinoWebSockets/blob/master/src/WebSocketsClient.h),
 [ArduinoJson deserialization](https://arduinojson.org/v7/api/json/deserializejson/).
+
+## LLM voice demos
+
+On an existing MySQL installation, apply `migrations/001_temporary_demos.sql` once
+before restarting the API. Fresh installations use the updated schema and procedures.
+Set `OPENAI_API_KEY` in the API service environment or its working directory's
+`.env`. Optionally set `OPENAI_MODEL` (default `gpt-4.1-mini`). Use one API worker
+so cancellation, playback and temporary-demo recovery share the same registry.
+
+Tap **LLM voice demo** and speak one sequence, for example “move forward, turn left,
+then toggle the lights.” The browser posts the final transcript to `POST /demos/voice`:
+
+```json
+{"vehicleId":1,"transcript":"move forward, turn left, then toggle the lights"}
+```
+
+A successful response is HTTP 202 with `demoId`, `vehicleId`, `totalMovements`
+and `status`. The API uses the OpenAI Responses API with separate instructions and
+transcript input. A bare model reply of 0, invalid movement data, or an inactive
+command yields HTTP 400. The API resolves command codes per vehicle, commits the
+temporary demo and all movements together, and starts playback. Stop cancels
+pending interpretation or playback. Completion and cancellation delete the demo
+and its child rows. The single-worker recovery loop retries orphan removal every minute.

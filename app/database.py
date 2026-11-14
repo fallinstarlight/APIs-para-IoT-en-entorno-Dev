@@ -235,3 +235,42 @@ def procedure_exists(name: str) -> bool:
     except MySQLError:
         logger.exception("procedure_exists check failed for %s", name)
         return False
+def create_temporary_demo(vehicle_id, steps):
+    """Resolve codes and insert parent and children on one transaction."""
+    from .errors import BadRequest, ResourceNotFound
+
+    try:
+        with get_connection() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute("SELECT vehicleId FROM vehicles WHERE vehicleId=%s FOR UPDATE", (vehicle_id,))
+            if not cur.fetchone():
+                raise ResourceNotFound("Vehicle not found")
+            cur.execute("SELECT commandId, code, name FROM commands WHERE vehicleId=%s "
+                        "AND isActive=1 FOR UPDATE", (vehicle_id,))
+            commands = {row["code"]: row for row in cur.fetchall()}
+            if any(step.code not in commands for step in steps):
+                raise BadRequest("Plan contains an unavailable command for this vehicle")
+            cur.execute("INSERT INTO demos(vehicleId,name,isTemporary) VALUES (%s,'LLM voice demo',1)",
+                        (vehicle_id,))
+            demo_id = cur.lastrowid
+            movements = []
+            for step in steps:
+                command = commands[step.code]
+                cur.execute("INSERT INTO demoMovements(demoId,commandId,sortOrder,durationMs,pauseMs) "
+                            "VALUES (%s,%s,%s,%s,%s)", (demo_id, command["commandId"], step.sortOrder,
+                                                       step.durationMs, step.pauseMs))
+                movements.append(dict(step.model_dump(), demoMovementId=cur.lastrowid,
+                                      commandId=command["commandId"], commandName=command["name"]))
+        return demo_id, movements
+    except MySQLError as exc:
+        raise _translate_mysql_error(exc, "create temporary demo") from exc
+
+
+def delete_temporary_demo(demo_id):
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM demos WHERE demoId=%s AND isTemporary=1", (demo_id,))
+
+
+def temporary_demo_ids():
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT demoId FROM demos WHERE isTemporary=1")
+        return [row[0] for row in cur.fetchall()]

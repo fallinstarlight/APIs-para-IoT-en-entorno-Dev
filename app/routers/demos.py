@@ -7,11 +7,13 @@ from ..demo_runner import (
     DemoAlreadyRunning,
     DemoNotFound,
     start_demo,
+    run_voice_demo,
 )
 from ..errors import BadRequest, Conflict, ResourceNotFound
 from ..schemas import (
     Demo,
     DemoCreate,
+    VoiceDemoRequest,
     DemoMovement,
     DemoMovementCreate,
     DemoMovementUpdate,
@@ -21,6 +23,17 @@ from ..schemas import (
 logger = logging.getLogger("iotvehicule.demos")
 
 router = APIRouter(prefix="/demos", tags=["Demos"])
+
+
+@router.post("/voice", status_code=status.HTTP_202_ACCEPTED)
+async def voice_demo(payload: VoiceDemoRequest):
+    transcript = payload.transcript.strip()
+    if not transcript:
+        raise BadRequest("Empty transcript")
+    try:
+        return await run_voice_demo(payload.vehicleId, transcript)
+    except DemoAlreadyRunning as exc:
+        raise Conflict(str(exc)) from exc
 
 
 # ------------------------------ CRUD -------------------------------------

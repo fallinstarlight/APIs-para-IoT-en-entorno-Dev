@@ -1,8 +1,11 @@
+import asyncio
+from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .demo_runner import recover_temporary_demos
 from .database import get_connection
 from .errors import register_exception_handlers
 from .routers import commands, demos, history, status, vehicles, ws_status
@@ -13,7 +16,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("iotvehicule")
 
+
+
+@asynccontextmanager
+async def lifespan(app):
+    cleanup = asyncio.create_task(recover_temporary_demos())
+    try:
+        yield
+    finally:
+        cleanup.cancel()
+        await asyncio.gather(cleanup, return_exceptions=True)
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="IoT Vehicle API",
     description=(
         "REST + WebSocket API exposing the `IotVehicle` MySQL stored "
