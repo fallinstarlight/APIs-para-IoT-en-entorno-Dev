@@ -2,7 +2,7 @@
 
 .env
 
-
+*.zip
 __pycache__
 
 # Local firmware builds and downloaded verification dependencies
